@@ -15,16 +15,46 @@ module FakeS3
     # sub second precision.
     SUBSECOND_PRECISION = 3
 
-    def initialize(root)
+    def initialize(root, ttl, ttl_bucket)
       @root = root
       @buckets = []
       @bucket_hash = {}
+      @ttl = ttl || 86400
+      @ttl_bucket = ttl_bucket
+      @times = []
+      @times_hash = Hash.new {|h,k| h[k] = []}
       Dir[File.join(root,"*")].each do |bucket|
         bucket_name = File.basename(bucket)
         bucket_obj = Bucket.new(bucket_name,Time.now,[])
         @buckets << bucket_obj
         @bucket_hash[bucket_name] = bucket_obj
       end
+      Thread.new do
+        while true do
+          seconds_to_wait = clean_fakes3
+          sleep seconds_to_wait
+        end
+      end
+    end
+
+    # Remove objects older than the ttl number of minutes. The return value of this
+    # function is how many seconds to wait until the next deletion cycle.
+    def clean_fakes3
+      while !@times.empty? do
+        oldest_seconds = Time.now.to_f - @times.first
+        if oldest_seconds > @ttl
+          Array.new(@times_hash[@times.first]).each do |obj|
+            if @ttl_bucket.nil? or obj.bucket.name == @ttl_bucket
+              delete_object(obj.bucket, obj.name, nil)
+            end
+          end
+          @times_hash.delete(@times.first)
+          @times.shift
+        else
+          return @ttl - oldest_seconds
+        end
+      end
+      return @ttl
     end
 
     # Pass a rate limit in bytes per second
@@ -149,9 +179,15 @@ module FakeS3
       obj.content_type = src_metadata[:content_type]
       obj.size = src_metadata[:size]
       obj.modified_date = src_metadata[:modified_date]
+      obj.bucket = dst_bucket
 
       src_obj = src_bucket.find(src_name)
       dst_bucket.add(obj)
+
+      # Since the object is copied, the modified_date should already be in @times
+      if @ttl_bucket.nil? or obj.bucket.name == @ttl_bucket
+        @times_hash[Time.parse(obj.modified_date).to_f] << obj
+      end
       return obj
     end
 
@@ -203,6 +239,24 @@ module FakeS3
         obj.content_type = metadata_struct[:content_type]
         obj.size = metadata_struct[:size]
         obj.modified_date = metadata_struct[:modified_date]
+        obj.bucket = bucket
+
+        if @ttl_bucket.nil? or obj.bucket.name == @ttl_bucket
+
+          # If this is an update operation, remove the old object from the ttl queue
+          old_obj = bucket.find(obj.name)
+          if !old_obj.nil?
+            @times_hash[Time.parse(old_obj.modified_date).to_f].delete(old_obj)
+          end
+
+          # Add the modified time to the @times queue and the object to the corresponding hash
+          time = Time.parse(obj.modified_date).to_f
+          if @times.last != time
+            @times << time
+          end
+          @times_hash[time] << obj
+
+        end
 
         bucket.add(obj)
         return obj
@@ -249,6 +303,9 @@ module FakeS3
         FileUtils.rm_rf(filename)
         object = bucket.find(object_name)
         bucket.remove(object)
+        if @ttl_bucket.nil? or obj.bucket.name == @ttl_bucket
+          @times_hash[Time.parse(object.modified_date).to_f].delete(object)
+        end
       rescue
         puts $!
         $!.backtrace.each { |line| puts line }

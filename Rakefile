@@ -12,7 +12,7 @@ end
 
 desc "Run the test_server"
 task :test_server do |t|
-  system("bundle exec bin/fakes3 --port 10453 --root test_root")
+  system("bundle exec bin/fakes3 --port 10453 --root test_root --ttl 1 --ttl_bucket ttl_bucket")
 end
 
 task :default => :test

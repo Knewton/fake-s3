@@ -9,6 +9,8 @@ module FakeS3
     desc "server", "Run a server on a particular hostname"
     method_option :root, :type => :string, :aliases => '-r', :required => true
     method_option :port, :type => :numeric, :aliases => '-p', :required => true
+    method_option :ttl, :type => :numeric, :aliases => '-t', :required => false, :desc => "Clean data if older than this many seconds."
+    method_option :ttl_bucket, :type => :string, :required => false, :desc => "Clean data older than ttl only from this bucket."
     method_option :address, :type => :string, :aliases => '-a', :required => false, :desc => "Bind to this address. Defaults to 0.0.0.0"
     method_option :hostname, :type => :string, :aliases => '-H', :desc => "The root name of the host.  Defaults to s3.amazonaws.com."
     method_option :quiet, :type => :boolean, :aliases => '-q', :desc => "Quiet; do not write anything to standard output."
@@ -21,7 +23,7 @@ module FakeS3
       if options[:root]
         root = File.expand_path(options[:root])
         # TODO Do some sanity checking here
-        store = FileStore.new(root)
+        store = FileStore.new(root, options[:ttl], options[:ttl_bucket])
       end
 
       if store.nil?

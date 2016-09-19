@@ -71,6 +71,3 @@ DEPENDENCIES
   rest-client
   right_aws
   test-unit
-
-BUNDLED WITH
-   1.10.2
